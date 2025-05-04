@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WebAssembly Square</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        canvas {
+            border: 2px solid #333;
+            background: white;
+            margin: 20px 0;
+        }
+
+        .controls {
+            margin: 10px;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Simple WebAssembly Square</h1>
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <div class="controls">
+        <button onclick="moveSquare(-10, 0)">← Left</button>
+        <button onclick="moveSquare(10, 0)">Right →</button>
+        <button onclick="moveSquare(0, -10)">↑ Up</button>
+        <button onclick="moveSquare(0, 10)">Down ↓</button>
+    </div>
+
+    <div class="controls">
+        <button onclick="changeColor(0xFF0000FF)">Red</button>
+        <button onclick="changeColor(0x00FF00FF)">Green</button>
+        <button onclick="changeColor(0x0000FFFF)">Blue</button>
+    </div>
+
+    <script>
+        let wasmModule;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Load WebAssembly module
+        async function loadWasm() {
+            try {
+                const response = await fetch('./build/release.wasm');
+                const wasmBytes = await response.arrayBuffer();
+                const { instance } = await WebAssembly.instantiate(wasmBytes, {
+                    env: {
+                        abort: (msg, file, line, column) => {
+                            console.error('Abort called from AssemblyScript');
+                        }
+                    }
+                });
+                wasmModule = instance.exports;
+                console.log('WASM module loaded successfully');
+
+                // Start render loop
+                requestAnimationFrame(render);
+            } catch (error) {
+                console.error('Failed to load WASM:', error);
+            }
+        }
+
+        // Render function
+        function render() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Get square properties from WASM
+            const x = wasmModule.getSquareX();
+            const y = wasmModule.getSquareY();
+            const size = wasmModule.getSquareSize();
+            const color = wasmModule.getSquareColor();
+
+            // Convert color from RGBA integer to CSS color
+            const r = (color >> 24) & 0xFF;
+            const g = (color >> 16) & 0xFF;
+            const b = (color >> 8) & 0xFF;
+            const a = (color & 0xFF) / 255;
+
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
+            ctx.fillRect(x, y, size, size);
+
+            requestAnimationFrame(render);
+        }
+
+        // Move square function
+        function moveSquare(dx, dy) {
+            if (wasmModule) {
+                wasmModule.moveSquare(dx, dy);
+            }
+        }
+
+        // Change color function
+        function changeColor(color) {
+            if (wasmModule) {
+                wasmModule.setSquareColor(color);
+            }
+        }
+
+        // Initialize
+        loadWasm();
+    </script>
+</body>
+
+</html>
