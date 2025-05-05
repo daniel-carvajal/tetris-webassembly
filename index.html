@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>WebAssembly Square</title>
+    <title>WebAssembly Tetris</title>
     <style>
         body {
             margin: 0;
@@ -14,45 +14,141 @@
             align-items: center;
         }
 
+        .game-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
         canvas {
             border: 2px solid #333;
+            background: #000;
+        }
+
+        .info-panel {
             background: white;
-            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            min-width: 200px;
         }
 
         .controls {
-            margin: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .controls div {
+            margin: 10px 0;
+        }
+
+        .score {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .level {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .next-piece {
+            margin-top: 20px;
+        }
+
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+
+        .game-over h2 {
+            margin: 0 0 10px 0;
         }
 
         button {
-            margin: 5px;
             padding: 10px 20px;
             font-size: 16px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        .next-canvas {
+            border: 1px solid #333;
+            background: #111;
         }
     </style>
 </head>
 
 <body>
-    <h1>Simple WebAssembly Square</h1>
-    <canvas id="canvas" width="800" height="600"></canvas>
+    <h1>WebAssembly Tetris</h1>
 
-    <div class="controls">
-        <button onclick="moveSquare(-10, 0)">← Left</button>
-        <button onclick="moveSquare(10, 0)">Right →</button>
-        <button onclick="moveSquare(0, -10)">↑ Up</button>
-        <button onclick="moveSquare(0, 10)">Down ↓</button>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="300" height="600"></canvas>
+
+        <div class="info-panel">
+            <div class="score">Score: <span id="scoreValue">0</span></div>
+            <div class="level">Level: <span id="levelValue">1</span></div>
+            <div class="next-piece">
+                <h3>Next:</h3>
+                <canvas id="nextCanvas" width="120" height="120" class="next-canvas"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="controls">
-        <button onclick="changeColor(0xFF0000FF)">Red</button>
-        <button onclick="changeColor(0x00FF00FF)">Green</button>
-        <button onclick="changeColor(0x0000FFFF)">Blue</button>
+        <div>← → : Move Left/Right</div>
+        <div>↑ : Rotate</div>
+        <div>↓ : Soft Drop</div>
+        <div>Space : Hard Drop</div>
+        <div>P : Pause/Resume</div>
+    </div>
+
+    <div class="game-over" id="gameOverPanel">
+        <h2>Game Over!</h2>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <button onclick="resetGame()">Play Again</button>
     </div>
 
     <script>
         let wasmModule;
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const gameCanvas = document.getElementById('gameCanvas');
+        const gameCtx = gameCanvas.getContext('2d');
+        const nextCanvas = document.getElementById('nextCanvas');
+        const nextCtx = nextCanvas.getContext('2d');
+
+        let gameLoop;
+        let dropCounter = 0;
+        let lastTime = 0;
+        let isPaused = false;
+
+        // Tetromino colors
+        const COLORS = [
+            '#000000', // Empty
+            '#00f0f0', // I - Cyan
+            '#0000f0', // J - Blue
+            '#f0a000', // L - Orange
+            '#f0f000', // O - Yellow
+            '#00f000', // S - Green
+            '#a000f0', // T - Purple
+            '#f00000'  // Z - Red
+        ];
 
         // Load WebAssembly module
         async function loadWasm() {
@@ -69,47 +165,180 @@
                 wasmModule = instance.exports;
                 console.log('WASM module loaded successfully');
 
-                // Start render loop
-                requestAnimationFrame(render);
+                // Initialize game
+                wasmModule.initGame();
+
+                // Start game loop
+                requestAnimationFrame(update);
             } catch (error) {
                 console.error('Failed to load WASM:', error);
             }
         }
 
-        // Render function
-        function render() {
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Update game state
+        function update(time = 0) {
+            if (!isPaused && wasmModule) {
+                const deltaTime = time - lastTime;
+                lastTime = time;
 
-            // Get square properties from WASM
-            const x = wasmModule.getSquareX();
-            const y = wasmModule.getSquareY();
-            const size = wasmModule.getSquareSize();
-            const color = wasmModule.getSquareColor();
+                dropCounter += deltaTime;
 
-            // Convert color from RGBA integer to CSS color
-            const r = (color >> 24) & 0xFF;
-            const g = (color >> 16) & 0xFF;
-            const b = (color >> 8) & 0xFF;
-            const a = (color & 0xFF) / 255;
+                // Get drop delay based on level
+                const dropDelay = wasmModule.getDropDelay();
 
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
-            ctx.fillRect(x, y, size, size);
+                if (dropCounter > dropDelay) {
+                    wasmModule.moveDown();
+                    dropCounter = 0;
+                }
 
-            requestAnimationFrame(render);
-        }
+                // Check if game is over
+                if (wasmModule.isGameOver()) {
+                    showGameOver();
+                    return;
+                }
 
-        // Move square function
-        function moveSquare(dx, dy) {
-            if (wasmModule) {
-                wasmModule.moveSquare(dx, dy);
+                render();
             }
+
+            gameLoop = requestAnimationFrame(update);
         }
 
-        // Change color function
-        function changeColor(color) {
+        // Render game state
+        function render() {
+            if (!wasmModule) return;
+
+            // Clear canvases
+            gameCtx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+
+            // Get board dimensions
+            const boardWidth = wasmModule.getBoardWidth();
+            const boardHeight = wasmModule.getBoardHeight();
+            const blockSize = 30;
+
+            // Draw game board
+            for (let y = 0; y < boardHeight; y++) {
+                for (let x = 0; x < boardWidth; x++) {
+                    const cell = wasmModule.getBoardCell(x, y);
+                    if (cell > 0) {
+                        gameCtx.fillStyle = COLORS[cell];
+                        gameCtx.fillRect(x * blockSize, y * blockSize, blockSize - 1, blockSize - 1);
+                    }
+                }
+            }
+
+            // Draw current piece
+            const pieceType = wasmModule.getCurrentPieceType();
+            if (pieceType > 0) {
+                const pieceX = wasmModule.getCurrentPieceX();
+                const pieceY = wasmModule.getCurrentPieceY();
+                const pieceRotation = wasmModule.getCurrentPieceRotation();
+
+                for (let y = 0; y < 4; y++) {
+                    for (let x = 0; x < 4; x++) {
+                        if (wasmModule.getPieceCell(pieceType, pieceRotation, x, y)) {
+                            const drawX = (pieceX + x) * blockSize;
+                            const drawY = (pieceY + y) * blockSize;
+                            gameCtx.fillStyle = COLORS[pieceType];
+                            gameCtx.fillRect(drawX, drawY, blockSize - 1, blockSize - 1);
+                        }
+                    }
+                }
+            }
+
+            // Draw ghost piece
+            const ghostY = wasmModule.getGhostPieceY();
+            if (pieceType > 0 && ghostY >= 0) {
+                const pieceX = wasmModule.getCurrentPieceX();
+                const pieceRotation = wasmModule.getCurrentPieceRotation();
+
+                for (let y = 0; y < 4; y++) {
+                    for (let x = 0; x < 4; x++) {
+                        if (wasmModule.getPieceCell(pieceType, pieceRotation, x, y)) {
+                            const drawX = (pieceX + x) * blockSize;
+                            const drawY = (ghostY + y) * blockSize;
+                            gameCtx.fillStyle = COLORS[pieceType] + '40'; // Add transparency
+                            gameCtx.fillRect(drawX, drawY, blockSize - 1, blockSize - 1);
+                        }
+                    }
+                }
+            }
+
+            // Draw next piece
+            const nextPieceType = wasmModule.getNextPieceType();
+            if (nextPieceType > 0) {
+                const nextBlockSize = 24;
+                const offsetX = (nextCanvas.width - 4 * nextBlockSize) / 2;
+                const offsetY = (nextCanvas.height - 4 * nextBlockSize) / 2;
+
+                for (let y = 0; y < 4; y++) {
+                    for (let x = 0; x < 4; x++) {
+                        if (wasmModule.getPieceCell(nextPieceType, 0, x, y)) {
+                            nextCtx.fillStyle = COLORS[nextPieceType];
+                            nextCtx.fillRect(
+                                offsetX + x * nextBlockSize,
+                                offsetY + y * nextBlockSize,
+                                nextBlockSize - 1,
+                                nextBlockSize - 1
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Update score and level
+            document.getElementById('scoreValue').textContent = wasmModule.getScore();
+            document.getElementById('levelValue').textContent = wasmModule.getLevel();
+        }
+
+        // Handle keyboard input
+        document.addEventListener('keydown', (event) => {
+            if (!wasmModule || wasmModule.isGameOver()) return;
+
+            switch (event.key) {
+                case 'ArrowLeft':
+                    if (!isPaused) wasmModule.moveLeft();
+                    break;
+                case 'ArrowRight':
+                    if (!isPaused) wasmModule.moveRight();
+                    break;
+                case 'ArrowDown':
+                    if (!isPaused) wasmModule.moveDown();
+                    break;
+                case 'ArrowUp':
+                    if (!isPaused) wasmModule.rotate();
+                    break;
+                case ' ':
+                    if (!isPaused) wasmModule.hardDrop();
+                    event.preventDefault();
+                    break;
+                case 'p':
+                case 'P':
+                    togglePause();
+                    break;
+            }
+        });
+
+        // Toggle pause
+        function togglePause() {
+            isPaused = !isPaused;
+        }
+
+        // Show game over panel
+        function showGameOver() {
+            document.getElementById('finalScore').textContent = wasmModule.getScore();
+            document.getElementById('gameOverPanel').style.display = 'block';
+        }
+
+        // Reset game
+        function resetGame() {
             if (wasmModule) {
-                wasmModule.setSquareColor(color);
+                wasmModule.initGame();
+                document.getElementById('gameOverPanel').style.display = 'none';
+                dropCounter = 0;
+                lastTime = 0;
+                isPaused = false;
+                requestAnimationFrame(update);
             }
         }
 
